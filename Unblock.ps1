@@ -1,15 +1,19 @@
 # Unblock: a small window to switch GoodbyeDPI on/off and edit which sites it unblocks.
 # Launch with Unblock.vbs (no console flash). Needs install.ps1 to have run once (the app offers it).
-Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
+# Closing or minimizing hides it to the tray; -Tray starts it there (used when starting with Windows).
+param([switch]$Tray)
+Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms, System.Drawing
 
 $Root = $PSScriptRoot
 $SitesFile = Join-Path $Root 'sites.txt'
 $IconFile = Join-Path $Root 'unblock.ico'
 $Service = 'GoodbyeDPI'
+$RunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 
-# One window at a time.
+# One copy at a time. Opening it again tells the running copy to show its window.
 $mutex = New-Object System.Threading.Mutex($false, 'Local\HongUnblockApp')
-if (-not $mutex.WaitOne(0)) { exit }
+$showSignal = New-Object System.Threading.EventWaitHandle($false, 'AutoReset', 'Local\HongUnblockShow')
+if (-not $mutex.WaitOne(0)) { [void]$showSignal.Set(); exit }
 
 Add-Type -TypeDefinition @'
 using System; using System.Runtime.InteropServices;
@@ -130,15 +134,23 @@ $xaml = @"
       <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
     </Grid.RowDefinitions>
 
-    <Border Grid.Row="0" Background="$($P.Card)" BorderBrush="$($P.Stroke)" BorderThickness="1" CornerRadius="8" Padding="18,16">
-      <Grid>
-        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-        <StackPanel VerticalAlignment="Center">
-          <TextBlock x:Name="StateTitle" Text="Off" FontSize="20" FontWeight="SemiBold" FontFamily="Segoe UI Variable Display, Segoe UI"/>
-          <TextBlock x:Name="StateSub" Text="" Foreground="$($P.Sub)" Margin="0,2,0,0" TextWrapping="Wrap"/>
-        </StackPanel>
-        <ToggleButton x:Name="Power" Grid.Column="1" Style="{StaticResource Switch}" VerticalAlignment="Center" Margin="16,0,0,0"/>
-      </Grid>
+    <Border Grid.Row="0" Background="$($P.Card)" BorderBrush="$($P.Stroke)" BorderThickness="1" CornerRadius="8">
+      <StackPanel>
+        <Grid Margin="18,16">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <StackPanel VerticalAlignment="Center">
+            <TextBlock x:Name="StateTitle" Text="Off" FontSize="20" FontWeight="SemiBold" FontFamily="Segoe UI Variable Display, Segoe UI"/>
+            <TextBlock x:Name="StateSub" Text="" Foreground="$($P.Sub)" Margin="0,2,0,0" TextWrapping="Wrap"/>
+          </StackPanel>
+          <ToggleButton x:Name="Power" Grid.Column="1" Style="{StaticResource Switch}" VerticalAlignment="Center" Margin="16,0,0,0"/>
+        </Grid>
+        <Border Height="1" Background="$($P.Stroke)"/>
+        <Grid Margin="18,12">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <TextBlock Text="Start with Windows" VerticalAlignment="Center"/>
+          <ToggleButton x:Name="Startup" Grid.Column="1" Style="{StaticResource Switch}" VerticalAlignment="Center" Margin="16,0,0,0"/>
+        </Grid>
+      </StackPanel>
     </Border>
 
     <TextBlock Grid.Row="1" Text="Sites" FontWeight="SemiBold" Margin="2,22,0,8"/>
@@ -199,7 +211,7 @@ $xaml = @"
 
 $win = [Windows.Markup.XamlReader]::Parse($xaml)
 $ui = @{}
-foreach ($n in 'StateTitle', 'StateSub', 'Power', 'Sites', 'Empty', 'Input', 'Placeholder', 'FieldBorder', 'Add', 'Message', 'AddAnyway') { $ui[$n] = $win.FindName($n) }
+foreach ($n in 'StateTitle', 'StateSub', 'Power', 'Startup', 'Sites', 'Empty', 'Input', 'Placeholder', 'FieldBorder', 'Add', 'Message', 'AddAnyway') { $ui[$n] = $win.FindName($n) }
 if (Test-Path $IconFile) { try { $win.Icon = [Windows.Media.Imaging.BitmapFrame]::Create([Uri]$IconFile) } catch {} }
 $win.Add_SourceInitialized({
   $h = (New-Object System.Windows.Interop.WindowInteropHelper $win).Handle
@@ -224,8 +236,116 @@ $timer.Add_Tick({
       & $j.done $result
     }
   }
+  if ($showSignal.WaitOne(0)) { Show-Window }
+  # Keep the tray icon in sync if the service changes elsewhere (about every 3 seconds).
+  if ((++$script:ticks % 40) -eq 0 -and -not $script:jobs.Count) { Update-Tray (Get-State) }
 })
+$script:ticks = 0
 $timer.Start()
+
+# ---------- Tray: closing or minimizing hides the window here ----------
+# The .ico holds PNG images, which System.Drawing can't read, so decode the 32px one with WPF.
+$trayBitmap = try {
+  $frame = [Windows.Media.Imaging.BitmapDecoder]::Create([Uri]$IconFile, 'None', 'OnLoad').Frames |
+    Sort-Object { [math]::Abs($_.PixelWidth - 32) } | Select-Object -First 1
+  $enc = New-Object Windows.Media.Imaging.PngBitmapEncoder; $enc.Frames.Add([Windows.Media.Imaging.BitmapFrame]::Create($frame))
+  $ms = New-Object System.IO.MemoryStream; $enc.Save($ms)
+  New-Object System.Drawing.Bitmap $ms
+} catch { [System.Drawing.SystemIcons]::Application.ToBitmap() }
+$iconOn = [System.Drawing.Icon]::FromHandle($trayBitmap.GetHicon())
+$iconOff = & {
+  # Grey copy of the icon for when unblocking is off.
+  $src = $trayBitmap; $bmp = New-Object System.Drawing.Bitmap $src.Width, $src.Height
+  $m = New-Object System.Drawing.Imaging.ColorMatrix (, [single[][]](
+      [single[]](0.3, 0.3, 0.3, 0, 0), [single[]](0.59, 0.59, 0.59, 0, 0), [single[]](0.11, 0.11, 0.11, 0, 0),
+      [single[]](0, 0, 0, 0.8, 0), [single[]](0, 0, 0, 0, 1)))
+  $attr = New-Object System.Drawing.Imaging.ImageAttributes; $attr.SetColorMatrix($m)
+  $g = [System.Drawing.Graphics]::FromImage($bmp)
+  $g.DrawImage($src, (New-Object System.Drawing.Rectangle 0, 0, $src.Width, $src.Height), 0, 0, $src.Width, $src.Height, 'Pixel', $attr)
+  $g.Dispose()
+  [System.Drawing.Icon]::FromHandle($bmp.GetHicon())
+}
+$trayIcon = New-Object System.Windows.Forms.NotifyIcon
+$trayIcon.Icon = $iconOff; $trayIcon.Text = 'Unblock'; $trayIcon.Visible = $true
+# Tray menu in the app's colours (the default WinForms menu is a dated white box).
+Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition @'
+using System.Drawing; using System.Windows.Forms;
+public class MenuColors : ProfessionalColorTable {
+  Color bg, hover, line;
+  public MenuColors(Color bg, Color hover, Color line) { this.bg = bg; this.hover = hover; this.line = line; UseSystemColors = false; }
+  public override Color ToolStripDropDownBackground { get { return bg; } }
+  public override Color ImageMarginGradientBegin { get { return bg; } }
+  public override Color ImageMarginGradientMiddle { get { return bg; } }
+  public override Color ImageMarginGradientEnd { get { return bg; } }
+  public override Color MenuBorder { get { return line; } }
+  public override Color MenuItemBorder { get { return hover; } }
+  public override Color MenuItemSelected { get { return hover; } }
+  public override Color SeparatorDark { get { return line; } }
+  public override Color SeparatorLight { get { return bg; } }
+}
+'@
+$color = { param($hex) [System.Drawing.ColorTranslator]::FromHtml($hex) }
+$menu = New-Object System.Windows.Forms.ContextMenuStrip
+$menu.Renderer = New-Object System.Windows.Forms.ToolStripProfessionalRenderer (New-Object MenuColors (& $color $P.Card), (& $color $P.Hover), (& $color $P.Stroke))
+$menu.Font = New-Object System.Drawing.Font 'Segoe UI', 9.5
+$menu.ShowImageMargin = $false
+$menu.Padding = New-Object System.Windows.Forms.Padding 4
+$menuOpen = $menu.Items.Add('Open Unblock'); $menuOpen.Font = New-Object System.Drawing.Font $menu.Font, ([System.Drawing.FontStyle]::Bold)
+$menuPower = $menu.Items.Add('Turn off')
+[void]$menu.Items.Add('-')
+$menuQuit = $menu.Items.Add('Quit')
+foreach ($item in $menu.Items) { $item.ForeColor = & $color $P.Text; $item.Padding = New-Object System.Windows.Forms.Padding 8, 4, 8, 4 }
+$trayIcon.ContextMenuStrip = $menu
+
+function Update-Tray([string]$state) {
+  $trayIcon.Icon = if ($state -eq 'on') { $iconOn } else { $iconOff }
+  $trayIcon.Text = switch ($state) { 'on' { 'Unblock: on' } 'off' { 'Unblock: off' } default { 'Unblock: not set up' } }
+  $menuPower.Text = if ($state -eq 'on') { 'Turn off' } else { 'Turn on' }
+  $menuPower.Enabled = $state -ne 'missing' -and -not $script:jobs.Count
+}
+function Show-Window {
+  $win.Show()
+  if ($win.WindowState -eq 'Minimized') { $win.WindowState = 'Normal' }
+  [void]$win.Activate()
+  $win.Topmost = $true; $win.Topmost = $false # bring to front over other apps
+  Show-State (Get-State) ''
+}
+function Hide-Window {
+  $win.Hide()
+  # Explain the tray once, the first time the window goes away.
+  $flag = 'HKCU:\Software\HongUnblock'
+  if (-not (Get-ItemProperty $flag -Name TrayHint -ErrorAction SilentlyContinue)) {
+    [void](New-Item $flag -Force); Set-ItemProperty $flag TrayHint 1
+    $trayIcon.ShowBalloonTip(4000, 'Unblock is still running', 'Find it in the tray. Right-click the icon to quit.', 'None')
+  }
+}
+function Exit-App {
+  $script:quitting = $true
+  $trayIcon.Visible = $false; $trayIcon.Dispose()
+  $app.Shutdown()
+}
+
+$trayIcon.Add_MouseClick({ if ($_.Button -eq 'Left') { Show-Window } })
+$menuOpen.Add_Click({ Show-Window })
+$menuPower.Add_Click({ if ((Get-State) -eq 'on') { Set-Power 'off' 'Turning off...' } else { Set-Power 'on' 'Turning on...' } })
+$menuQuit.Add_Click({ Exit-App })
+$win.Add_Closing({ if (-not $script:quitting) { $_.Cancel = $true; Hide-Window } })
+# Stay minimized while hidden; Show-Window restores it. (Restoring while hidden leaves the window off screen.)
+$win.Add_StateChanged({ if ($win.WindowState -eq 'Minimized') { Hide-Window } })
+
+# ---------- Start with Windows: opens Unblock in the tray at sign-in and starts unblocking ----------
+function Get-Startup { [bool](Get-ItemProperty $RunKey -Name Unblock -ErrorAction SilentlyContinue) }
+$ui.Startup.Add_Click({
+  $on = [bool]$ui.Startup.IsChecked
+  sc.exe config $Service start= $(if ($on) { 'auto' } else { 'demand' }) | Out-Null
+  if ($LASTEXITCODE) {
+    $ui.Startup.IsChecked = Get-Startup
+    Set-Message 'Could not change this. Run install.ps1 again to give the app permission.' 'warn'
+    return
+  }
+  if ($on) { Set-ItemProperty $RunKey Unblock "`"$env:WINDIR\System32\wscript.exe`" `"$Root\Unblock.vbs`" -Tray" }
+  else { Remove-ItemProperty $RunKey -Name Unblock -ErrorAction SilentlyContinue }
+})
 
 # ---------- Service ----------
 $serviceWork = {
@@ -251,6 +371,8 @@ function Show-State([string]$state, [string]$busy) {
     'off' { $ui.Power.IsChecked = $false; $ui.StateTitle.Text = 'Off'; $ui.StateSub.Text = "Blocked sites won't load." }
     default { $ui.Power.IsChecked = $false; $ui.StateTitle.Text = 'Not set up'; $ui.StateSub.Text = 'Turn on to set it up. Windows will ask for permission once.' }
   }
+  $ui.Startup.IsEnabled = $state -ne 'missing'
+  Update-Tray $state
 }
 
 function Set-Power([string]$action, [string]$busyText) {
@@ -371,6 +493,12 @@ $win.Add_Activated({ if (-not $script:jobs.Count) { Show-State (Get-State) '' } 
 
 Show-Sites
 Show-State (Get-State) ''
+$ui.Startup.IsChecked = Get-Startup
 $win.Add_ContentRendered({ $ui.Input.Focus() })
-[void]$win.ShowDialog()
+
+# Keep running with the window hidden; only Quit in the tray menu ends the app.
+$app = New-Object Windows.Application
+$app.ShutdownMode = 'OnExplicitShutdown'
+if (-not $Tray) { $win.Show() }
+[void]$app.Run()
 $mutex.ReleaseMutex()

@@ -40,9 +40,13 @@ try {
   # New-Service, not sc.exe: Windows PowerShell drops the quotes sc.exe needs around paths with spaces.
   New-Service GoodbyeDPI -BinaryPathName "`"$Exe`" -e 2 --native-frag --blacklist `"$Sites`"" -StartupType Automatic `
     -DisplayName 'GoodbyeDPI' -Description 'Gets around ISP site blocking for the sites in Unblock' | Out-Null
-  # Default service permissions, plus start/stop for the user.
-  sc.exe sdset GoodbyeDPI "D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)(A;;CCLCSWRPWPDTLOCRRC;;;$UserSid)" | Out-Null
+  # Default service permissions, plus start/stop and start-with-Windows changes (DC) for the user.
+  sc.exe sdset GoodbyeDPI "D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)(A;;CCDCLCSWRPWPDTLOCRRC;;;$UserSid)" | Out-Null
   sc.exe start GoodbyeDPI | Out-Null
+
+  # Start with Windows: open Unblock in the user's tray at sign-in.
+  $run = "Registry::HKEY_USERS\$UserSid\Software\Microsoft\Windows\CurrentVersion\Run"
+  if (Test-Path $run) { Set-ItemProperty $run Unblock "`"$env:WINDIR\System32\wscript.exe`" `"$Root\Unblock.vbs`" -Tray" }
 
   # Shortcuts go in the real user's folders, found from their ID.
   $profileDir = (Get-CimInstance Win32_UserProfile | Where-Object SID -eq $UserSid).LocalPath

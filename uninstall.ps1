@@ -9,5 +9,6 @@ if (-not $isAdmin) {
 sc.exe stop GoodbyeDPI 2>&1 | Out-Null
 sc.exe delete GoodbyeDPI 2>&1 | Out-Null
 sc.exe stop WinDivert 2>&1 | Out-Null
-$profileDir = (Get-CimInstance Win32_UserProfile | Where-Object SID -eq $UserSid).LocalPath
+Remove-ItemProperty "Registry::HKEY_USERS\$UserSid\Software\Microsoft\Windows\CurrentVersion\Run" -Name Unblock -ErrorAction SilentlyContinue
+$profileDir =(Get-CimInstance Win32_UserProfile | Where-Object SID -eq $UserSid).LocalPath
 Remove-Item "$profileDir\Desktop\Unblock.lnk", "$profileDir\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Unblock.lnk" -ErrorAction SilentlyContinue
