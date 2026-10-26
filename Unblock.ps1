@@ -403,7 +403,8 @@ function Show-Sites {
   $ui.Empty.Visibility = if ($ui.Sites.Items.Count) { 'Collapsed' } else { 'Visible' }
 }
 function Save-Sites([string[]]$list) {
-  [System.IO.File]::WriteAllLines($SitesFile, [string[]]($list | Sort-Object -Unique))
+  # @() keeps an empty list an empty array: a $null here makes WriteAllLines throw, so the last site never went.
+  [System.IO.File]::WriteAllLines($SitesFile, [string[]]@($list | Sort-Object -Unique))
   Show-Sites
   # GoodbyeDPI reads the list at start, so restart it to apply changes.
   if ((Get-State) -eq 'on') { Set-Power 'restart' 'Applying changes...' } else { Show-State (Get-State) '' }
