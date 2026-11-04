@@ -1,4 +1,4 @@
-# Unblock: a small window to switch GoodbyeDPI on/off and edit which sites it unblocks.
+# Unblock: a small front end for GoodbyeDPI. Switches it on/off, picks its options, and whether it covers all sites or a list.
 # Launch with Unblock.vbs (no console flash). Needs install.ps1 to have run once (the app offers it).
 # Closing or minimizing hides it to the tray; -Tray starts it there (used when starting with Windows).
 param([switch]$Tray)
@@ -43,7 +43,7 @@ $P = if ($dark) {
 $xaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Unblock" Width="420" Height="560" MinWidth="360" MinHeight="420"
+        Title="Unblock" Width="460" SizeToContent="Height" ResizeMode="CanMinimize"
         WindowStartupLocation="CenterScreen" Background="$($P.Bg)"
         FontFamily="Segoe UI Variable Text, Segoe UI" FontSize="14" Foreground="$($P.Text)"
         TextOptions.TextFormattingMode="Display" UseLayoutRounding="True">
@@ -112,6 +112,37 @@ $xaml = @"
         </ControlTemplate>
       </Setter.Value></Setter>
     </Style>
+    <Style x:Key="Segment" TargetType="RadioButton">
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Foreground" Value="$($P.Text)"/>
+      <Setter Property="Template"><Setter.Value>
+        <ControlTemplate TargetType="RadioButton">
+          <Border x:Name="B" CornerRadius="4" Padding="12,4" Background="Transparent"><ContentPresenter/></Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="B" Property="Background" Value="$($P.Hover)"/></Trigger>
+            <Trigger Property="IsChecked" Value="True"><Setter TargetName="B" Property="Background" Value="$($P.Accent)"/><Setter Property="Foreground" Value="White"/></Trigger>
+            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.5"/></Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value></Setter>
+    </Style>
+    <Style x:Key="Chip" TargetType="RadioButton">
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="FontSize" Value="13"/>
+      <Setter Property="Foreground" Value="$($P.Text)"/>
+      <Setter Property="Margin" Value="0,0,6,6"/>
+      <Setter Property="Template"><Setter.Value>
+        <ControlTemplate TargetType="RadioButton">
+          <Border x:Name="B" CornerRadius="12" Padding="10,3" Background="Transparent" BorderBrush="$($P.Stroke)" BorderThickness="1"><ContentPresenter/></Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="B" Property="Background" Value="$($P.Hover)"/></Trigger>
+            <Trigger Property="IsChecked" Value="True">
+              <Setter TargetName="B" Property="Background" Value="$($P.Accent)"/><Setter TargetName="B" Property="BorderBrush" Value="$($P.Accent)"/><Setter Property="Foreground" Value="White"/>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value></Setter>
+    </Style>
     <Style x:Key="Remove" TargetType="Button">
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="ToolTip" Value="Remove"/>
@@ -129,12 +160,8 @@ $xaml = @"
     </Style>
   </Window.Resources>
 
-  <Grid Margin="20">
-    <Grid.RowDefinitions>
-      <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
-    </Grid.RowDefinitions>
-
-    <Border Grid.Row="0" Background="$($P.Card)" BorderBrush="$($P.Stroke)" BorderThickness="1" CornerRadius="8">
+  <StackPanel Margin="20">
+    <Border Background="$($P.Card)" BorderBrush="$($P.Stroke)" BorderThickness="1" CornerRadius="8">
       <StackPanel>
         <Grid Margin="18,16">
           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -153,9 +180,43 @@ $xaml = @"
       </StackPanel>
     </Border>
 
-    <TextBlock Grid.Row="1" Text="Sites" FontWeight="SemiBold" Margin="2,22,0,8"/>
+    <StackPanel x:Name="Settings">
+      <Grid Margin="2,22,0,0">
+        <TextBlock Text="Unblock" FontWeight="SemiBold" VerticalAlignment="Center"/>
+        <Border HorizontalAlignment="Right" Background="$($P.Card)" BorderBrush="$($P.Stroke)" BorderThickness="1" CornerRadius="6" Padding="2">
+          <StackPanel Orientation="Horizontal">
+            <RadioButton x:Name="ScopeAll" Content="All sites" GroupName="Scope" Style="{StaticResource Segment}"/>
+            <RadioButton x:Name="ScopeList" Content="My list" GroupName="Scope" Style="{StaticResource Segment}"/>
+          </StackPanel>
+        </Border>
+      </Grid>
 
-    <Border Grid.Row="2" Background="$($P.Card)" BorderBrush="$($P.Stroke)" BorderThickness="1" CornerRadius="8">
+      <Grid Margin="2,22,0,8">
+        <TextBlock Text="GoodbyeDPI options" FontWeight="SemiBold"/>
+        <Button x:Name="Docs" Content="All options" Style="{StaticResource Link}" HorizontalAlignment="Right" FontSize="13"
+                ToolTip="GoodbyeDPI's list of options, on GitHub"/>
+      </Grid>
+      <Border Background="$($P.Card)" BorderBrush="$($P.Stroke)" BorderThickness="1" CornerRadius="8" Padding="14">
+        <StackPanel>
+          <WrapPanel x:Name="Presets"/>
+          <Grid Margin="0,4,0,0">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <Border x:Name="OptionsBorder" Background="$($P.Field)" BorderBrush="$($P.Stroke)" BorderThickness="1" CornerRadius="6" Height="32">
+              <!-- One line: a wrapping TextBox hangs this auto-height window on open. -->
+              <TextBox x:Name="Options" Background="Transparent" BorderThickness="0" Foreground="$($P.Text)" CaretBrush="$($P.Text)"
+                       FontFamily="Cascadia Mono, Consolas" FontSize="12" VerticalContentAlignment="Center" Padding="4,0"/>
+            </Border>
+            <Button x:Name="ApplyOptions" Grid.Column="1" Content="Apply" Style="{StaticResource Btn}" Height="32" Margin="8,0,0,0" Visibility="Collapsed"/>
+          </Grid>
+          <TextBlock x:Name="OptionsHint" Foreground="$($P.Sub)" FontSize="13" TextWrapping="Wrap" Margin="2,8,0,0"/>
+        </StackPanel>
+      </Border>
+    </StackPanel>
+
+    <StackPanel x:Name="SitesPanel">
+    <TextBlock Text="Sites" FontWeight="SemiBold" Margin="2,22,0,8"/>
+
+    <Border Height="200" Background="$($P.Card)" BorderBrush="$($P.Stroke)" BorderThickness="1" CornerRadius="8">
       <Grid>
         <ListBox x:Name="Sites" Background="Transparent" BorderThickness="0" Padding="4"
                  ScrollViewer.HorizontalScrollBarVisibility="Disabled" Foreground="$($P.Text)">
@@ -188,7 +249,7 @@ $xaml = @"
       </Grid>
     </Border>
 
-    <Grid Grid.Row="3" Margin="0,12,0,0">
+    <Grid Margin="0,12,0,0">
       <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
       <Border x:Name="FieldBorder" Background="$($P.Field)" BorderBrush="$($P.Stroke)" BorderThickness="1" CornerRadius="6" Height="36">
         <Grid>
@@ -200,18 +261,20 @@ $xaml = @"
       </Border>
       <Button x:Name="Add" Grid.Column="1" Content="Add" Style="{StaticResource Btn}" Height="36" Margin="8,0,0,0" IsDefault="True"/>
     </Grid>
+    </StackPanel>
 
-    <StackPanel Grid.Row="4" Margin="2,10,0,0" MinHeight="40">
+    <StackPanel Margin="2,10,0,0" MinHeight="40">
       <TextBlock x:Name="Message" Foreground="$($P.Sub)" TextWrapping="Wrap"/>
       <Button x:Name="AddAnyway" Content="Add anyway" Style="{StaticResource Link}" HorizontalAlignment="Left" Margin="0,4,0,0" Visibility="Collapsed"/>
     </StackPanel>
-  </Grid>
+  </StackPanel>
 </Window>
 "@
 
 $win = [Windows.Markup.XamlReader]::Parse($xaml)
 $ui = @{}
-foreach ($n in 'StateTitle', 'StateSub', 'Power', 'Startup', 'Sites', 'Empty', 'Input', 'Placeholder', 'FieldBorder', 'Add', 'Message', 'AddAnyway') { $ui[$n] = $win.FindName($n) }
+foreach ($n in 'StateTitle', 'StateSub', 'Power', 'Startup', 'Settings', 'ScopeAll', 'ScopeList', 'Docs', 'Presets', 'Options', 'OptionsBorder', 'ApplyOptions', 'OptionsHint',
+  'SitesPanel', 'Sites', 'Empty', 'Input', 'Placeholder', 'FieldBorder', 'Add', 'Message', 'AddAnyway') { $ui[$n] = $win.FindName($n) }
 if (Test-Path $IconFile) { try { $win.Icon = [Windows.Media.Imaging.BitmapFrame]::Create([Uri]$IconFile) } catch {} }
 $win.Add_SourceInitialized({
   $h = (New-Object System.Windows.Interop.WindowInteropHelper $win).Handle
@@ -363,11 +426,12 @@ function Get-State {
 
 function Show-State([string]$state, [string]$busy) {
   $count = $ui.Sites.Items.Count
-  $sitesWord = if ($count -eq 1) { '1 site' } else { "$count sites" }
+  $what = if ($script:cfg -and -not $script:cfg.List) { 'all sites' } elseif ($count -eq 1) { '1 site' } else { "$count sites" }
   $ui.Power.IsEnabled = -not $busy
+  $ui.Settings.IsEnabled = -not $busy -and $state -ne 'missing'
   if ($busy) { $ui.StateSub.Text = $busy; return }
   switch ($state) {
-    'on' { $ui.Power.IsChecked = $true; $ui.StateTitle.Text = 'On'; $ui.StateSub.Text = "Unblocking $sitesWord." }
+    'on' { $ui.Power.IsChecked = $true; $ui.StateTitle.Text = 'On'; $ui.StateSub.Text = "Unblocking $what." }
     'off' { $ui.Power.IsChecked = $false; $ui.StateTitle.Text = 'Off'; $ui.StateSub.Text = "Blocked sites won't load." }
     default { $ui.Power.IsChecked = $false; $ui.StateTitle.Text = 'Not set up'; $ui.StateSub.Text = 'Turn on to set it up. Windows will ask for permission once.' }
   }
@@ -377,7 +441,69 @@ function Show-State([string]$state, [string]$busy) {
 
 function Set-Power([string]$action, [string]$busyText) {
   Show-State '' $busyText
-  Start-Work $serviceWork $action { param($r) Show-State (Get-State) '' }
+  $script:powerAction = $action
+  Start-Work $serviceWork $action {
+    param($r)
+    Show-State (Get-State) ''
+    # GoodbyeDPI quits straight away on options it doesn't understand.
+    if ($script:powerAction -ne 'off' -and $r -ne 'Running') { Set-Message "GoodbyeDPI didn't start with these options. Pick a preset to go back." 'warn' }
+  }
+}
+
+# ---------- GoodbyeDPI options: the service's command line is the only copy of these settings ----------
+$ServiceKey = "HKLM:\SYSTEM\CurrentControlSet\Services\$Service"
+$Presets = @(
+  @{ Name = 'Recommended'; Args = '-f 2 -e 2 --native-frag --reverse-frag --auto-ttl'; Note = 'Tested on FPT: works for Steam (store, downloads, cloud) and Cloudflare sites.' }
+  @{ Name = 'GoodbyeDPI default'; Args = '-9'; Note = "GoodbyeDPI's own default. On FPT it breaks many Cloudflare sites, so use it with My list." }
+  @{ Name = 'Gentle'; Args = '-e 2 --native-frag'; Note = 'Only splits secure connections. Steam downloads and other plain connections stay blocked.' }
+)
+$BlacklistArg = '\s*--blacklist\s+("[^"]*"|\S+)'
+
+function Get-Config {
+  $path = (Get-ItemProperty $ServiceKey -Name ImagePath -ErrorAction SilentlyContinue).ImagePath
+  if ($path -notmatch '^\s*("[^"]+"|\S+)\s*(.*)$') { return $null }
+  $exe = $matches[1].Trim('"'); $rest = $matches[2] # copy first: the next -match replaces $matches
+  @{ Exe = $exe; List = $rest -match $BlacklistArg; Options = (($rest -replace $BlacklistArg, '') -replace '\s+', ' ').Trim() }
+}
+
+function Set-Config([string]$options, [bool]$list) {
+  $bin = "`"$($script:cfg.Exe)`" $options"
+  if ($list) { $bin += " --blacklist `"$SitesFile`"" }
+  # Pass sc.exe its arguments verbatim: Windows PowerShell mangles quotes inside native arguments.
+  $psi = New-Object Diagnostics.ProcessStartInfo 'sc.exe', "config $Service binPath= `"$($bin -replace '"', '\"')`""
+  $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true; $psi.RedirectStandardOutput = $true
+  $sc = [Diagnostics.Process]::Start($psi); [void]$sc.StandardOutput.ReadToEnd(); $sc.WaitForExit()
+  $sc.ExitCode -eq 0
+}
+
+function Show-Options {
+  $t = ($ui.Options.Text -replace '\s+', ' ').Trim()
+  $preset = $Presets | Where-Object { $_.Args -eq $t } | Select-Object -First 1
+  foreach ($chip in $ui.Presets.Children) { $chip.IsChecked = $preset -and $chip.Tag -eq $preset.Args }
+  $ui.OptionsHint.Text = if ($preset) { $preset.Note } elseif ($t) { 'Your own options, passed to GoodbyeDPI as typed.' } else { 'Pick a preset or type options.' }
+  $ui.ApplyOptions.Visibility = if ($script:cfg -and $t -ne $script:cfg.Options) { 'Visible' } else { 'Collapsed' }
+}
+
+function Show-Config {
+  $script:cfg = Get-Config
+  $list = $script:cfg -and $script:cfg.List
+  $ui.ScopeAll.IsChecked = -not $list; $ui.ScopeList.IsChecked = $list
+  $ui.SitesPanel.Visibility = if ($list) { 'Visible' } else { 'Collapsed' }
+  $ui.Options.Text = if ($script:cfg) { $script:cfg.Options } else { '' }
+  Show-Options
+}
+
+function Set-Options([string]$options, [bool]$list) {
+  $options = ($options -replace '\s+', ' ').Trim()
+  if (-not $script:cfg) { return }
+  if (-not $options) { Set-Message 'Pick a preset or type some GoodbyeDPI options.' 'warn'; return }
+  if ($options -eq $script:cfg.Options -and $list -eq $script:cfg.List) { Show-Config; return }
+  $ok = Set-Config $options $list
+  Show-Config
+  if (-not $ok) { Set-Message 'Could not change this. Run install.ps1 again to give the app permission.' 'warn'; return }
+  Set-Message '' ''
+  # GoodbyeDPI reads its options at start, so restart it to apply them.
+  if ((Get-State) -eq 'on') { Set-Power 'restart' 'Applying...' } else { Show-State (Get-State) '' }
 }
 
 $ui.Power.Add_Click({
@@ -386,6 +512,7 @@ $ui.Power.Add_Click({
     Show-State '' 'Setting up...'
     # install.ps1 asks Windows for admin permission itself.
     try { Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $Root 'install.ps1')`"" -Wait -WindowStyle Hidden } catch {}
+    Show-Config
     Show-State (Get-State) ''
   } elseif ($ui.Power.IsChecked) { Set-Power 'on' 'Turning on...' }
   else { Set-Power 'off' 'Turning off...' }
@@ -489,10 +616,30 @@ $ui.Input.Add_TextChanged({
 $ui.Input.Add_GotKeyboardFocus({ $ui.FieldBorder.BorderBrush = & $brush $P.Accent })
 $ui.Input.Add_LostKeyboardFocus({ $ui.FieldBorder.BorderBrush = & $brush $P.Stroke })
 
+foreach ($preset in $Presets) {
+  $chip = New-Object Windows.Controls.RadioButton -Property @{ Content = $preset.Name; Tag = $preset.Args; GroupName = 'Preset'; ToolTip = $preset.Args }
+  $chip.Style = $win.FindResource('Chip')
+  $chip.Add_Click({ param($s) $ui.Options.Text = $s.Tag; Set-Options $s.Tag ([bool]$ui.ScopeList.IsChecked) })
+  [void]$ui.Presets.Children.Add($chip)
+}
+# Show-Config also checks these, but only to match $script:cfg, so the guards keep that from re-applying.
+$ui.ScopeAll.Add_Checked({ if ($script:cfg.List) { Set-Options $script:cfg.Options $false } })
+$ui.ScopeList.Add_Checked({ if ($script:cfg -and -not $script:cfg.List) { Read-Sites | Out-Null; Set-Options $script:cfg.Options $true } })
+$ui.ApplyOptions.Add_Click({ Set-Options $ui.Options.Text ([bool]$ui.ScopeList.IsChecked) })
+$ui.Options.Add_TextChanged({ Show-Options })
+$ui.Options.Add_PreviewKeyDown({
+  if ($_.Key -eq 'Return') { $_.Handled = $true; if ($ui.ApplyOptions.Visibility -eq 'Visible') { Set-Options $ui.Options.Text ([bool]$ui.ScopeList.IsChecked) } }
+  elseif ($_.Key -eq 'Escape') { $_.Handled = $true; $ui.Options.Text = $script:cfg.Options }
+})
+$ui.Options.Add_GotKeyboardFocus({ $ui.OptionsBorder.BorderBrush = & $brush $P.Accent })
+$ui.Options.Add_LostKeyboardFocus({ $ui.OptionsBorder.BorderBrush = & $brush $P.Stroke })
+$ui.Docs.Add_Click({ Start-Process 'https://github.com/ValdikSS/GoodbyeDPI#how-to-use' })
+
 # Pick up changes made outside the app (e.g. turned off elsewhere) when the window regains focus.
 $win.Add_Activated({ if (-not $script:jobs.Count) { Show-State (Get-State) '' } })
 
 Show-Sites
+Show-Config
 Show-State (Get-State) ''
 $ui.Startup.IsChecked = Get-Startup
 $win.Add_ContentRendered({ $ui.Input.Focus() })

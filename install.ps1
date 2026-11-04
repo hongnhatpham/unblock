@@ -1,4 +1,4 @@
-# Sets up Unblock: downloads GoodbyeDPI, installs it as a background service for the sites in sites.txt,
+# Sets up Unblock: downloads GoodbyeDPI, installs it as a background service,
 # lets the current user switch it on/off without admin, and adds Desktop and Start menu shortcuts.
 # Safe to run again. Asks for admin permission once.
 param([string]$UserSid)
@@ -31,15 +31,19 @@ try {
   }
   if (-not (Test-Path $Sites)) { Copy-Item (Join-Path $Root 'sites.default.txt') $Sites }
 
-  # Gentle mode: only split the HTTPS handshake, only for listed sites. The aggressive -9 mode broke Cloudflare sites.
+  # Keep the options picked in the app, pointing the site list at this folder in case it moved.
+  # New setups get the options tested on FPT, for all sites: GoodbyeDPI's own -9 broke Cloudflare sites there.
+  $Options = '-f 2 -e 2 --native-frag --reverse-frag --auto-ttl'
+  $old = (Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Services\GoodbyeDPI -Name ImagePath -ErrorAction SilentlyContinue).ImagePath
+  if ($old -match '^\s*("[^"]+"|\S+)\s+(\S.*)$') { $Options = $matches[2] -replace '--blacklist\s+("[^"]*"|\S+)', "--blacklist `"$Sites`"" }
   sc.exe stop GoodbyeDPI 2>&1 | Out-Null
   sc.exe delete GoodbyeDPI 2>&1 | Out-Null
   # Unload GoodbyeDPI's network driver too, so it reloads from this folder if the folder moved.
   sc.exe stop WinDivert 2>&1 | Out-Null
   for ($i = 0; $i -lt 25 -and (Get-Service GoodbyeDPI -ErrorAction SilentlyContinue); $i++) { Start-Sleep -Milliseconds 200 }
   # New-Service, not sc.exe: Windows PowerShell drops the quotes sc.exe needs around paths with spaces.
-  New-Service GoodbyeDPI -BinaryPathName "`"$Exe`" -e 2 --native-frag --blacklist `"$Sites`"" -StartupType Automatic `
-    -DisplayName 'GoodbyeDPI' -Description 'Gets around ISP site blocking for the sites in Unblock' | Out-Null
+  New-Service GoodbyeDPI -BinaryPathName "`"$Exe`" $Options" -StartupType Automatic `
+    -DisplayName 'GoodbyeDPI' -Description 'Gets around ISP site blocking. Set up from the Unblock app.' | Out-Null
   # Default service permissions, plus start/stop and start-with-Windows changes (DC) for the user.
   sc.exe sdset GoodbyeDPI "D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)(A;;CCDCLCSWRPWPDTLOCRRC;;;$UserSid)" | Out-Null
   sc.exe start GoodbyeDPI | Out-Null
